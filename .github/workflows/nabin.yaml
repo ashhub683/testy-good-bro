@@ -1,53 +1,93 @@
-name: Test-Xray-Config
+name: V2Ray Config Tester
 
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 jobs:
-  test-xray:
+  test-configs:
     runs-on: ubuntu-latest
     steps:
-      # مراحل نصب و تنظیم Xray مانند قبل...
-
-      - name: Test Proxy with YouTube
-        id: youtube_test
+      - name: Install dependencies
         run: |
-          if ! curl --socks5 127.0.0.1:1080 -o /dev/null -s -w "%{http_code}" -v https://www.youtube.com > youtube_response.txt; then
-            echo "::error::Failed to connect to YouTube"
-            exit 1
-          fi
-          RESPONSE_CODE=$(cat youtube_response.txt)
-          if [ "$RESPONSE_CODE" -ne 200 ]; then
-            echo "::error::YouTube returned HTTP $RESPONSE_CODE"
-            exit 1
-          fi
+          sudo apt-get update
+          sudo apt-get install -y curl jq base64
 
-      - name: Check IP & Country via API
-        id: ip_check
+      - name: Fetch configurations
         run: |
-          if ! curl --socks5 127.0.0.1:1080 -s https://ipinfo.io/json > ip_info.json; then
-            echo "::error::Failed to get IP information"
-            exit 1
-          fi
-          jq -e '.ip' ip_info.json || (echo "::error::Invalid IP response"; exit 1)
+          curl -s "https://i-am-in-love.crzsi.workers.dev/subscribe/v2ray.txt?protocol=vmess,vless,shadowsocks,trojan&ports=All%20Ports&tuic=on" > configs.txt
+          echo "Total configs found: $(wc -l < configs.txt)"
 
-      - name: Validate Configuration
-        if: always()
+      - name: Test configurations
         run: |
-          FAILURE_COUNT=0
-          [ "${{ steps.youtube_test.outcome }}" != "success" ] && FAILURE_COUNT=$((FAILURE_COUNT+1))
-          [ "${{ steps.ip_check.outcome }}" != "success" ] && FAILURE_COUNT=$((FAILURE_COUNT+1))
-          
-          if [ $FAILURE_COUNT -gt 0 ]; then
-            echo "::error::🛑 این کانفیگ خراب است! (مشکل در $FAILURE_COUNT تست)"
-            echo "----------------------------------------"
-            echo "راه‌حل‌های احتمالی:"
-            echo "1. تنظیمات TLS و WS را بررسی کنید"
-            echo "2. اتصال به سرور خارج را تست کنید"
-            echo "3. شناسه کاربری (UUID) را چک کنید"
-            echo "4. پورت و آدرس سرور را بررسی نمایید"
-            exit 1
-          else
-            echo "✅ کانفیگ به درستی کار می‌کند!"
-          fi
+          mkdir -p temp_configs
+          echo "" > correct_configs.txt
+
+          while read -r line; do
+            if [[ "$line" == vmess://* ]]; then
+              echo "Processing config: ${line:0:30}..."
+              
+              # Decode base64
+              decoded=$(echo "${line:8}" | base64 -d 2>/dev/null)
+              if [ -z "$decoded" ]; then
+                echo "::error::Invalid base64 encoding"
+                continue
+              fi
+
+              # Extract parameters
+              address=$(echo "$decoded" | jq -r '.add')
+              port=$(echo "$decoded" | jq -r '.port')
+              id=$(echo "$decoded" | jq -r '.id')
+
+              # Generate Xray config
+              cat > temp_configs/config.json <<EOF
+              {
+                "inbounds": [{
+                  "port": 1080,
+                  "listen": "127.0.0.1",
+                  "protocol": "socks",
+                  "settings": {"auth": "noauth"}
+                }],
+                "outbounds": [{
+                  "protocol": "vmess",
+                  "settings": {
+                    "vnext": [{
+                      "address": "$address",
+                      "port": $port,
+                      "users": [{"id": "$id"}]
+                    }]
+                  },
+                  "streamSettings": {
+                    "network": "tcp",
+                    "security": "none"
+                  }
+                }]
+              }
+              EOF
+
+              # Run Xray and test
+              timeout 20s ./xray/xray -c temp_configs/config.json &> xray.log &
+              sleep 5
+              
+              if curl --socks5 127.0.0.1:1080 -o /dev/null -s -w "%{http_code}" https://www.youtube.com | grep -q 200; then
+                echo "$line" >> correct_configs.txt
+                echo "✅ Config worked!"
+              else
+                echo "❌ Config failed"
+              fi
+
+              pkill -f xray
+              sleep 2
+            fi
+          done < configs.txt
+
+      - name: Show valid configs
+        run: |
+          echo "Valid configurations:"
+          cat correct_configs.txt
+          echo -e "\nTotal valid configs: $(wc -l < correct_configs.txt)"
+
+      - name: Upload results
+        uses: actions/upload-artifact@v3
+        with:
+          name: valid-configs
+          path: correct_configs.txt
