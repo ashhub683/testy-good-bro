@@ -23,7 +23,14 @@ jobs:
           cat > config.json <<'EOF'
           {
             "log": { "loglevel": "debug" },
-            "api": { "services": ["HandlerService", "StatsService", "LoggerService"] },
+            "api": {
+              "tag": "api",
+              "services": [
+                "HandlerService",
+                "StatsService",
+                "LoggerService"
+              ]
+            },
             "inbounds": [
               {
                 "port": 1080,
@@ -55,9 +62,7 @@ jobs:
                   "tlsSettings": {},
                   "wsSettings": {
                     "path": "/hFx0NzRZFREAmxpG/MTkyLjIzNy4xOTIuMTcyLDEyOS44MC4xNzcuNDIsMjMuMTU3LjQwLjEwMywxODQuMTY5LjE4MS4yMTc==?ed=2560",
-                    "headers": {
-                      "Host": "testforwork1324.pages.dev"
-                    }
+                    "headers": { "Host": "testforwork1324.pages.dev" }
                   },
                   "alpn": [ "h2", "http/1.1" ],
                   "fp": "randomized",
