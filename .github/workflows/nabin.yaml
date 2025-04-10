@@ -22,14 +22,10 @@ jobs:
         run: |
           cat > config.json <<'EOF'
           {
-            "log": { "loglevel": "debug" },
-            "api": {
-              "tag": "api",
-              "services": [
-                "HandlerService",
-                "StatsService",
-                "LoggerService"
-              ]
+            "log": { 
+              "loglevel": "debug",
+              "access": "access.log",
+              "error": "error.log"
             },
             "inbounds": [
               {
@@ -45,7 +41,7 @@ jobs:
                 "settings": {
                   "vnext": [
                     {
-                      "address": "104.17.132.222",
+                      "address": "testforwork1324.pages.dev",  # Use domain instead of IP
                       "port": 443,
                       "users": [
                         {
@@ -59,20 +55,20 @@ jobs:
                 "streamSettings": {
                   "network": "ws",
                   "security": "tls",
-                  "tlsSettings": {},
+                  "tlsSettings": {
+                    "serverName": "testforwork1324.pages.dev"  # Explicit SNI
+                  },
                   "wsSettings": {
-                    "path": "/hFx0NzRZFREAmxpG/MTkyLjIzNy4xOTIuMTcyLDEyOS44MC4xNzcuNDIsMjMuMTU3LjQwLjEwMywxODQuMTY5LjE4MS4yMTc==?ed=2560",
+                    "path": "/correct-path-here",  # Verify correct WebSocket path
                     "headers": { "Host": "testforwork1324.pages.dev" }
                   },
-                  "alpn": [ "h2", "http/1.1" ],
-                  "fp": "randomized",
-                  "sni": "testforwork1324.pages.dev"
+                  "alpn": ["h2", "http/1.1"],
+                  "fp": "chrome"  # Use recognized fingerprint
                 },
                 "tag": "proxy"
               },
               {
                 "protocol": "freedom",
-                "settings": {},
                 "tag": "direct"
               }
             ],
@@ -81,25 +77,30 @@ jobs:
               "rules": [
                 {
                   "type": "field",
-                  "ip": [ "geoip:private" ],
+                  "ip": ["geoip:private"],
                   "outboundTag": "direct"
                 }
               ]
             }
           }
           EOF
-
-      - name: Run Xray in background
+      - name: Run Xray with logging
         run: |
-          ./xray/xray -config config.json &
-          # افزایش زمان انتظار به 15 ثانیه جهت اطمینان از راه‌اندازی کامل Xray
-          sleep 15
-
-      - name: Test Proxy via curl (verbose output)
-        id: curl-test
+          ./xray/xray -config config.json &> xray.log &
+          sleep 20  # Increased initialization time
+      - name: Show Xray logs
+        run: cat xray.log
+      - name: Test Proxy Connection
         run: |
-          curl --socks5 127.0.0.1:1080 -o /dev/null -s -w "Total time: %{time_total} seconds\n" -v https://www.google.com > result.txt
-          cat result.txt
+          # Test basic connectivity first
+          curl --socks5 127.0.0.1:1080 -v http://example.com
+          # Then test HTTPS with verbose output
+          curl --socks5 127.0.0.1:1080 -o /dev/null -s -w "Total time: %{time_total}s\n" -v https://www.google.com
+      - name: Capture logs on failure
+        if: ${{ failure() }}
+        run: |
+          cat xray.log
+          cat access.log
+          cat error.log
       - name: Stop Xray
-        run: |
-          pkill -f xray
+        run: pkill -f xray
