@@ -8,7 +8,7 @@ jobs:
   test-xray:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v2
       - name: Install Dependencies
         run: |
           sudo apt-get update
@@ -95,8 +95,3 @@ jobs:
       - name: Stop Xray
         run: |
           pkill -f xray
-      - name: Upload Result Artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: test-result
-          path: result.txt
