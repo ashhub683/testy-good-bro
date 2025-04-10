@@ -10,7 +10,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl jq unzip
+          sudo apt-get install -y curl jq coreutils openssl unzip
           
       - name: Download Xray
         run: |
@@ -33,18 +33,22 @@ jobs:
               echo "Processing config: ${line:0:30}..."
               
               decoded=$(echo "${line:8}" | { base64 -d 2>/dev/null || openssl base64 -d -A 2>/dev/null; } | jq -c 2>/dev/null)
-              
               if [ -z "$decoded" ]; then
                 echo "::warning::Invalid config format"
                 continue
               fi
 
-              address=$(echo "$decoded" | jq -r '.add')
-              port=$(echo "$decoded" | jq -r '.port')
-              id=$(echo "$decoded" | jq -r '.id')
+              address=$(echo "$decoded" | jq -r '.add // empty')
+              port=$(echo "$decoded" | jq -r '.port // empty')
+              id=$(echo "$decoded" | jq -r '.id // empty')
 
-              # Generate dynamic config
-              cat > temp_configs/config.json <<EOF
+              if [[ -z "$address" || -z "$port" || -z "$id" ]]; then
+                echo "::warning::Missing required fields"
+                continue
+              fi
+
+              # ایجاد فایل کانفیگ با سینتکس اصلاح شده
+              cat <<-EOF > temp_configs/config.json
               {
                 "log": {"loglevel": "warning"},
                 "inbounds": [{
@@ -59,10 +63,7 @@ jobs:
                     "vnext": [{
                       "address": "$address",
                       "port": $port,
-                      "users": [{
-                        "id": "$id",
-                        "security": "auto"
-                      }]
+                      "users": [{"id": "$id"}]
                     }]
                   },
                   "streamSettings": {
@@ -73,11 +74,10 @@ jobs:
               }
               EOF
 
-              # Test with 30s timeout
               timeout 30s ./xray/xray -c temp_configs/config.json &> xray.log &
-              sleep 8  # Increased wait time
+              sleep 10
               
-              if curl --socks5 127.0.0.1:1080 -o /dev/null -s -w "%{http_code}" --max-time 15 https://www.youtube.com | grep -q 200; then
+              if curl --socks5 127.0.0.1:1080 -o /dev/null -s -w "%{http_code}" --max-time 20 https://www.youtube.com | grep -q 200; then
                 echo "$line" >> correct_configs.txt
                 echo "✅ Working config!"
               else
@@ -85,7 +85,7 @@ jobs:
               fi
 
               pkill -f xray
-              sleep 3
+              sleep 2
             fi
           done < configs.txt
 
