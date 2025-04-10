@@ -1,0 +1,102 @@
+name: Test-Xray-Config
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-xray:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl unzip
+      - name: Download Xray
+        run: |
+          wget https://github.com/XTLS/Xray-core/releases/download/v25.3.6/Xray-linux-64.zip
+          unzip Xray-linux-64.zip -d xray
+          chmod +x xray/xray
+      - name: Create Config File
+        run: |
+          cat > config.json <<'EOF'
+          {
+            "log": { "loglevel": "debug" },
+            "api": { "services": ["HandlerService", "StatsService", "LoggerService"] },
+            "inbounds": [
+              {
+                "port": 1080,
+                "listen": "127.0.0.1",
+                "protocol": "socks",
+                "settings": { "auth": "noauth", "udp": false }
+              }
+            ],
+            "outbounds": [
+              {
+                "protocol": "vless",
+                "settings": {
+                  "vnext": [
+                    {
+                      "address": "104.17.132.222",
+                      "port": 443,
+                      "users": [
+                        {
+                          "id": "71e4f7be-839e-4709-a7a0-5d820a593fc1",
+                          "encryption": "none"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "streamSettings": {
+                  "network": "ws",
+                  "security": "tls",
+                  "tlsSettings": {},
+                  "wsSettings": {
+                    "path": "/hFx0NzRZFREAmxpG/MTkyLjIzNy4xOTIuMTcyLDEyOS44MC4xNzcuNDIsMjMuMTU3LjQwLjEwMywxODQuMTY5LjE4MS4yMTc==?ed=2560",
+                    "headers": {
+                      "Host": "testforwork1324.pages.dev"
+                    }
+                  },
+                  "alpn": [ "h2", "http/1.1" ],
+                  "fp": "randomized",
+                  "sni": "testforWorK1324.PAGEs.deV"
+                },
+                "tag": "proxy"
+              },
+              {
+                "protocol": "freedom",
+                "settings": {},
+                "tag": "direct"
+              }
+            ],
+            "routing": {
+              "domainStrategy": "AsIs",
+              "rules": [
+                {
+                  "type": "field",
+                  "ip": [ "geoip:private" ],
+                  "outboundTag": "direct"
+                }
+              ]
+            }
+          }
+          EOF
+      - name: Run Xray
+        run: |
+          ./xray/xray -config config.json &
+          sleep 5
+      - name: Test Proxy via curl
+        id: curl-test
+        run: |
+          curl --socks5 127.0.0.1:1080 -o /dev/null -s -w "Total time: %{time_total} seconds\n" https://www.google.com > result.txt
+          cat result.txt
+      - name: Stop Xray
+        run: |
+          pkill -f xray
+      - name: Upload Result Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-result
+          path: result.txt
