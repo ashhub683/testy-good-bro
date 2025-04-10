@@ -66,7 +66,7 @@ jobs:
                   },
                   "alpn": [ "h2", "http/1.1" ],
                   "fp": "randomized",
-                  "sni": "testforWorK1324.PAGEs.deV"
+                  "sni": "testforwork1324.pages.dev"
                 },
                 "tag": "proxy"
               },
@@ -88,11 +88,14 @@ jobs:
             }
           }
           EOF
+
       - name: Run Xray in background
         run: |
           ./xray/xray -config config.json &
+          # افزایش زمان انتظار به 15 ثانیه جهت اطمینان از راه‌اندازی کامل Xray
           sleep 15
-      - name: Test Proxy via curl (with verbose output)
+
+      - name: Test Proxy via curl (verbose output)
         id: curl-test
         run: |
           curl --socks5 127.0.0.1:1080 -o /dev/null -s -w "Total time: %{time_total} seconds\n" -v https://www.google.com > result.txt
