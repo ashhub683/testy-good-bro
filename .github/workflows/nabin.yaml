@@ -10,7 +10,13 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl jq base64
+          sudo apt-get install -y curl jq base64 unzip
+          
+      - name: Download Xray
+        run: |
+          wget https://github.com/XTLS/Xray-core/releases/download/v1.8.11/Xray-linux-64.zip
+          unzip Xray-linux-64.zip -d xray
+          chmod +x xray/xray
 
       - name: Fetch configurations
         run: |
@@ -26,21 +32,21 @@ jobs:
             if [[ "$line" == vmess://* ]]; then
               echo "Processing config: ${line:0:30}..."
               
-              # Decode base64
-              decoded=$(echo "${line:8}" | base64 -d 2>/dev/null)
+              # Decode and validate config
+              decoded=$(echo "${line:8}" | base64 -d 2>/dev/null | jq -c 2>/dev/null)
               if [ -z "$decoded" ]; then
-                echo "::error::Invalid base64 encoding"
+                echo "::warning::Invalid config format"
                 continue
               fi
 
-              # Extract parameters
               address=$(echo "$decoded" | jq -r '.add')
               port=$(echo "$decoded" | jq -r '.port')
               id=$(echo "$decoded" | jq -r '.id')
 
-              # Generate Xray config
+              # Generate dynamic config
               cat > temp_configs/config.json <<EOF
               {
+                "log": {"loglevel": "warning"},
                 "inbounds": [{
                   "port": 1080,
                   "listen": "127.0.0.1",
@@ -53,7 +59,10 @@ jobs:
                     "vnext": [{
                       "address": "$address",
                       "port": $port,
-                      "users": [{"id": "$id"}]
+                      "users": [{
+                        "id": "$id",
+                        "security": "auto"
+                      }]
                     }]
                   },
                   "streamSettings": {
@@ -64,30 +73,30 @@ jobs:
               }
               EOF
 
-              # Run Xray and test
-              timeout 20s ./xray/xray -c temp_configs/config.json &> xray.log &
-              sleep 5
+              # Test with 30s timeout
+              timeout 30s ./xray/xray -c temp_configs/config.json &> xray.log &
+              sleep 8  # Increased wait time
               
-              if curl --socks5 127.0.0.1:1080 -o /dev/null -s -w "%{http_code}" https://www.youtube.com | grep -q 200; then
+              if curl --socks5 127.0.0.1:1080 -o /dev/null -s -w "%{http_code}" --max-time 15 https://www.youtube.com | grep -q 200; then
                 echo "$line" >> correct_configs.txt
-                echo "✅ Config worked!"
+                echo "✅ Working config!"
               else
-                echo "❌ Config failed"
+                echo "❌ Connection failed"
               fi
 
               pkill -f xray
-              sleep 2
+              sleep 3
             fi
           done < configs.txt
 
       - name: Show valid configs
         run: |
-          echo "Valid configurations:"
+          echo "----- Valid Configurations -----"
           cat correct_configs.txt
-          echo -e "\nTotal valid configs: $(wc -l < correct_configs.txt)"
+          echo -e "\nTotal Valid: $(wc -l < correct_configs.txt)"
 
       - name: Upload results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: valid-configs
           path: correct_configs.txt
