@@ -83,14 +83,14 @@ jobs:
             }
           }
           EOF
-      - name: Run Xray
+      - name: Run Xray in background
         run: |
           ./xray/xray -config config.json &
-          sleep 5
-      - name: Test Proxy via curl
+          sleep 15
+      - name: Test Proxy via curl (with verbose output)
         id: curl-test
         run: |
-          curl --socks5 127.0.0.1:1080 -o /dev/null -s -w "Total time: %{time_total} seconds\n" https://www.google.com > result.txt
+          curl --socks5 127.0.0.1:1080 -o /dev/null -s -w "Total time: %{time_total} seconds\n" -v https://www.google.com > result.txt
           cat result.txt
       - name: Stop Xray
         run: |
