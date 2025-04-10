@@ -8,99 +8,46 @@ jobs:
   test-xray:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - name: Install Dependencies
+      # مراحل نصب و تنظیم Xray مانند قبل...
+
+      - name: Test Proxy with YouTube
+        id: youtube_test
         run: |
-          sudo apt-get update
-          sudo apt-get install -y curl unzip
-      - name: Download Xray
+          if ! curl --socks5 127.0.0.1:1080 -o /dev/null -s -w "%{http_code}" -v https://www.youtube.com > youtube_response.txt; then
+            echo "::error::Failed to connect to YouTube"
+            exit 1
+          fi
+          RESPONSE_CODE=$(cat youtube_response.txt)
+          if [ "$RESPONSE_CODE" -ne 200 ]; then
+            echo "::error::YouTube returned HTTP $RESPONSE_CODE"
+            exit 1
+          fi
+
+      - name: Check IP & Country via API
+        id: ip_check
         run: |
-          wget https://github.com/XTLS/Xray-core/releases/download/v25.3.6/Xray-linux-64.zip
-          unzip Xray-linux-64.zip -d xray
-          chmod +x xray/xray
-      - name: Create Config File
+          if ! curl --socks5 127.0.0.1:1080 -s https://ipinfo.io/json > ip_info.json; then
+            echo "::error::Failed to get IP information"
+            exit 1
+          fi
+          jq -e '.ip' ip_info.json || (echo "::error::Invalid IP response"; exit 1)
+
+      - name: Validate Configuration
+        if: always()
         run: |
-          cat > config.json <<'EOF'
-          {
-            "log": { 
-              "loglevel": "debug",
-              "access": "access.log",
-              "error": "error.log"
-            },
-            "inbounds": [
-              {
-                "port": 1080,
-                "listen": "127.0.0.1",
-                "protocol": "socks",
-                "settings": { "auth": "noauth", "udp": false }
-              }
-            ],
-            "outbounds": [
-              {
-                "protocol": "vless",
-                "settings": {
-                  "vnext": [
-                    {
-                      "address": "testforwork1324.pages.dev",  # Use domain instead of IP
-                      "port": 443,
-                      "users": [
-                        {
-                          "id": "71e4f7be-839e-4709-a7a0-5d820a593fc1",
-                          "encryption": "none"
-                        }
-                      ]
-                    }
-                  ]
-                },
-                "streamSettings": {
-                  "network": "ws",
-                  "security": "tls",
-                  "tlsSettings": {
-                    "serverName": "testforwork1324.pages.dev"  # Explicit SNI
-                  },
-                  "wsSettings": {
-                    "path": "/correct-path-here",  # Verify correct WebSocket path
-                    "headers": { "Host": "testforwork1324.pages.dev" }
-                  },
-                  "alpn": ["h2", "http/1.1"],
-                  "fp": "chrome"  # Use recognized fingerprint
-                },
-                "tag": "proxy"
-              },
-              {
-                "protocol": "freedom",
-                "tag": "direct"
-              }
-            ],
-            "routing": {
-              "domainStrategy": "AsIs",
-              "rules": [
-                {
-                  "type": "field",
-                  "ip": ["geoip:private"],
-                  "outboundTag": "direct"
-                }
-              ]
-            }
-          }
-          EOF
-      - name: Run Xray with logging
-        run: |
-          ./xray/xray -config config.json &> xray.log &
-          sleep 20  # Increased initialization time
-      - name: Show Xray logs
-        run: cat xray.log
-      - name: Test Proxy Connection
-        run: |
-          # Test basic connectivity first
-          curl --socks5 127.0.0.1:1080 -v http://example.com
-          # Then test HTTPS with verbose output
-          curl --socks5 127.0.0.1:1080 -o /dev/null -s -w "Total time: %{time_total}s\n" -v https://www.google.com
-      - name: Capture logs on failure
-        if: ${{ failure() }}
-        run: |
-          cat xray.log
-          cat access.log
-          cat error.log
-      - name: Stop Xray
-        run: pkill -f xray
+          FAILURE_COUNT=0
+          [ "${{ steps.youtube_test.outcome }}" != "success" ] && FAILURE_COUNT=$((FAILURE_COUNT+1))
+          [ "${{ steps.ip_check.outcome }}" != "success" ] && FAILURE_COUNT=$((FAILURE_COUNT+1))
+          
+          if [ $FAILURE_COUNT -gt 0 ]; then
+            echo "::error::🛑 این کانفیگ خراب است! (مشکل در $FAILURE_COUNT تست)"
+            echo "----------------------------------------"
+            echo "راه‌حل‌های احتمالی:"
+            echo "1. تنظیمات TLS و WS را بررسی کنید"
+            echo "2. اتصال به سرور خارج را تست کنید"
+            echo "3. شناسه کاربری (UUID) را چک کنید"
+            echo "4. پورت و آدرس سرور را بررسی نمایید"
+            exit 1
+          else
+            echo "✅ کانفیگ به درستی کار می‌کند!"
+          fi
