@@ -47,32 +47,30 @@ jobs:
                 continue
               fi
 
-              # ایجاد فایل کانفیگ با سینتکس اصلاح شده
-              cat <<-EOF > temp_configs/config.json
-              {
-                "log": {"loglevel": "warning"},
-                "inbounds": [{
-                  "port": 1080,
-                  "listen": "127.0.0.1",
-                  "protocol": "socks",
-                  "settings": {"auth": "noauth"}
-                }],
-                "outbounds": [{
-                  "protocol": "vmess",
-                  "settings": {
-                    "vnext": [{
-                      "address": "$address",
-                      "port": $port,
-                      "users": [{"id": "$id"}]
-                    }]
-                  },
-                  "streamSettings": {
-                    "network": "tcp",
-                    "security": "none"
-                  }
-                }]
-              }
-              EOF
+              # ایجاد فایل کانفیگ با روش جایگزین
+              printf '{\n' > temp_configs/config.json
+              printf '  "log": {"loglevel": "warning"},\n' >> temp_configs/config.json
+              printf '  "inbounds": [{\n' >> temp_configs/config.json
+              printf '    "port": 1080,\n' >> temp_configs/config.json
+              printf '    "listen": "127.0.0.1",\n' >> temp_configs/config.json
+              printf '    "protocol": "socks",\n' >> temp_configs/config.json
+              printf '    "settings": {"auth": "noauth"}\n' >> temp_configs/config.json
+              printf '  }],\n' >> temp_configs/config.json
+              printf '  "outbounds": [{\n' >> temp_configs/config.json
+              printf '    "protocol": "vmess",\n' >> temp_configs/config.json
+              printf '    "settings": {\n' >> temp_configs/config.json
+              printf '      "vnext": [{\n' >> temp_configs/config.json
+              printf '        "address": "%s",\n' "$address" >> temp_configs/config.json
+              printf '        "port": %s,\n' "$port" >> temp_configs/config.json
+              printf '        "users": [{"id": "%s"}]\n' "$id" >> temp_configs/config.json
+              printf '      }]\n' >> temp_configs/config.json
+              printf '    },\n' >> temp_configs/config.json
+              printf '    "streamSettings": {\n' >> temp_configs/config.json
+              printf '      "network": "tcp",\n' >> temp_configs/config.json
+              printf '      "security": "none"\n' >> temp_configs/config.json
+              printf '    }\n' >> temp_configs/config.json
+              printf '  }]\n' >> temp_configs/config.json
+              printf '}\n' >> temp_configs/config.json
 
               timeout 30s ./xray/xray -c temp_configs/config.json &> xray.log &
               sleep 10
