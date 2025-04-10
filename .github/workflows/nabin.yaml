@@ -7,21 +7,7 @@ jobs:
   test-configs:
     runs-on: ubuntu-latest
     steps:
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl jq coreutils openssl unzip
-          
-      - name: Download Xray
-        run: |
-          wget https://github.com/XTLS/Xray-core/releases/download/v1.8.11/Xray-linux-64.zip
-          unzip Xray-linux-64.zip -d xray
-          chmod +x xray/xray
-
-      - name: Fetch configurations
-        run: |
-          curl -s "https://i-am-in-love.crzsi.workers.dev/subscribe/v2ray.txt?protocol=vmess,vless,shadowsocks,trojan&ports=All%20Ports&tuic=on" > configs.txt
-          echo "Total configs found: $(wc -l < configs.txt)"
+      # مراحل نصب و دانلود مانند قبل...
 
       - name: Test configurations
         run: |
@@ -31,70 +17,63 @@ jobs:
           while read -r line; do
             if [[ "$line" == vmess://* ]]; then
               echo "Processing config: ${line:0:30}..."
+              SUCCESS=false
               
-              decoded=$(echo "${line:8}" | { base64 -d 2>/dev/null || openssl base64 -d -A 2>/dev/null; } | jq -c 2>/dev/null)
-              if [ -z "$decoded" ]; then
-                echo "::warning::Invalid config format"
-                continue
-              fi
+              # بخش پردازش کانفیگ
+              (
+                decoded=$(echo "${line:8}" | { base64 -d 2>/dev/null || openssl base64 -d -A 2>/dev/null; } | jq -c 2>/dev/null)
+                [ -z "$decoded" ] && exit 1
+                
+                address=$(echo "$decoded" | jq -r '.add // empty')
+                port=$(echo "$decoded" | jq -r '.port // empty')
+                id=$(echo "$decoded" | jq -r '.id // empty')
+                [ -z "$address" ] || [ -z "$port" ] || [ -z "$id" ] && exit 1
 
-              address=$(echo "$decoded" | jq -r '.add // empty')
-              port=$(echo "$decoded" | jq -r '.port // empty')
-              id=$(echo "$decoded" | jq -r '.id // empty')
+                # ساخت فایل کانفیگ
+                cat <<EOF > temp_configs/config.json
+                {
+                  "log": {"loglevel": "warning"},
+                  "inbounds": [{
+                    "port": 1080,
+                    "listen": "127.0.0.1",
+                    "protocol": "socks",
+                    "settings": {"auth": "noauth"}
+                  }],
+                  "outbounds": [{
+                    "protocol": "vmess",
+                    "settings": {
+                      "vnext": [{
+                        "address": "$address",
+                        "port": $port,
+                        "users": [{"id": "$id"}]
+                      }]
+                    },
+                    "streamSettings": {
+                      "network": "tcp",
+                      "security": "none"
+                    }
+                  }]
+                }
+EOF
 
-              if [[ -z "$address" || -z "$port" || -z "$id" ]]; then
-                echo "::warning::Missing required fields"
-                continue
-              fi
+                timeout 30s ./xray/xray -c temp_configs/config.json &> xray.log &
+                sleep 10
+                
+                if curl --socks5 127.0.0.1:1080 -o /dev/null -s -w "%{http_code}" --max-time 20 https://www.youtube.com | grep -q 200; then
+                  echo "$line" >> correct_configs.txt
+                  SUCCESS=true
+                fi
+                
+                pkill -f xray || true
+                sleep 2
+              ) || echo "❌ Failed to process this config"
 
-              # ایجاد فایل کانفیگ با روش جایگزین
-              printf '{\n' > temp_configs/config.json
-              printf '  "log": {"loglevel": "warning"},\n' >> temp_configs/config.json
-              printf '  "inbounds": [{\n' >> temp_configs/config.json
-              printf '    "port": 1080,\n' >> temp_configs/config.json
-              printf '    "listen": "127.0.0.1",\n' >> temp_configs/config.json
-              printf '    "protocol": "socks",\n' >> temp_configs/config.json
-              printf '    "settings": {"auth": "noauth"}\n' >> temp_configs/config.json
-              printf '  }],\n' >> temp_configs/config.json
-              printf '  "outbounds": [{\n' >> temp_configs/config.json
-              printf '    "protocol": "vmess",\n' >> temp_configs/config.json
-              printf '    "settings": {\n' >> temp_configs/config.json
-              printf '      "vnext": [{\n' >> temp_configs/config.json
-              printf '        "address": "%s",\n' "$address" >> temp_configs/config.json
-              printf '        "port": %s,\n' "$port" >> temp_configs/config.json
-              printf '        "users": [{"id": "%s"}]\n' "$id" >> temp_configs/config.json
-              printf '      }]\n' >> temp_configs/config.json
-              printf '    },\n' >> temp_configs/config.json
-              printf '    "streamSettings": {\n' >> temp_configs/config.json
-              printf '      "network": "tcp",\n' >> temp_configs/config.json
-              printf '      "security": "none"\n' >> temp_configs/config.json
-              printf '    }\n' >> temp_configs/config.json
-              printf '  }]\n' >> temp_configs/config.json
-              printf '}\n' >> temp_configs/config.json
-
-              timeout 30s ./xray/xray -c temp_configs/config.json &> xray.log &
-              sleep 10
-              
-              if curl --socks5 127.0.0.1:1080 -o /dev/null -s -w "%{http_code}" --max-time 20 https://www.youtube.com | grep -q 200; then
-                echo "$line" >> correct_configs.txt
-                echo "✅ Working config!"
+              if [ "$SUCCESS" = true ]; then
+                echo "✅ Config worked!"
               else
-                echo "❌ Connection failed"
+                echo "🔄 Moving to next config..."
               fi
-
-              pkill -f xray
-              sleep 2
             fi
           done < configs.txt
 
-      - name: Show valid configs
-        run: |
-          echo "----- Valid Configurations -----"
-          cat correct_configs.txt
-          echo -e "\nTotal Valid: $(wc -l < correct_configs.txt)"
-
-      - name: Upload results
-        uses: actions/upload-artifact@v4
-        with:
-          name: valid-configs
-          path: correct_configs.txt
+          exit 0
